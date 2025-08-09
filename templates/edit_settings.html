@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Edit Settings</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            max-width: 700px;
+            margin: 2rem auto;
+            padding: 1rem;
+        }
+        h1 {
+            font-size: 1.5rem;
+            text-align: center;
+        }
+        h2 {
+            font-size: 1.2rem;
+            margin-top: 2rem;
+            border-bottom: 1px solid #ccc;
+            padding-bottom: 0.3rem;
+        }
+        form {
+            display: flex;
+            flex-direction: column;
+        }
+        .form-group {
+            display: flex;
+            align-items: center;
+            margin: 0.5rem 0;
+        }
+        label {
+            flex: 1;
+            font-weight: bold;
+            font-size: 0.95rem;
+        }
+        input[type="text"] {
+            flex: 2;
+            padding: 0.4rem;
+            font-size: 0.95rem;
+        }
+        button {
+            margin-top: 1.5rem;
+            padding: 0.6rem 1.2rem;
+            font-size: 1rem;
+            display: block;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <h1>Edit settings.ini</h1>
+
+    <form action="{{ request.scope.root_path }}/">
+        <button type="submit">🏠 Return to Dashboard</button>
+    </form>
+
+    <form method="post">
+        {% for section, settings in config.items() %}
+            <h2>{{ section }}</h2>
+            {% for key, value in settings.items() %}
+            <div class="form-group">
+                <label for="{{ section }}__{{ key }}">{{ key }}</label>
+                <input type="text" id="{{ section }}__{{ key }}" name="{{ section }}__{{ key }}" value="{{ value }}">
+            </div>
+            {% endfor %}
+        {% endfor %}
+        <button type="submit">💾 Save</button>
+    </form>
+</body>
+
+</html>
