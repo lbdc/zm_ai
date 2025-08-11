@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Compact Image Viewer with Batch Deletion</title>
+<style>
+body {
+    padding-bottom: 70px; /* Make space for bottomControls */
+}
+
+.thumbnail {
+    display: inline-block;
+    margin: 5px;
+    position: relative;
+    transition: transform 0.3s ease; /* Add transition for smooth scaling */
+}
+
+.thumbnail img {
+    max-width: 300px;
+    max-height: 300px;
+    display: block;
+    transition: transform 0.3s ease; /* Add transition for smooth scaling */
+}
+.label {
+    position: relative;
+    top: 10px;
+    left: 10px;
+    color: black;
+    cursor: pointer;
+    border-radius: 5px;
+    z-index: 1; /* Ensure button appears above image */
+    margin-bottom: 10px; /* Adjust the value as needed */
+}
+button {
+    position: relative;
+    top: 10px;
+    left: 10px;
+    color: black;
+    cursor: pointer;
+    border-radius: 5px;
+    z-index: 1; /* Ensure button appears above image */
+    margin-bottom: 10px; /* Adjust the value as needed */
+}
+.bottom-controls {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    background: white;
+    border-top: 1px solid #ccc;
+    padding: 10px;
+    text-align: center;
+    z-index: 1000;
+    box-shadow: 0 -2px 6px rgba(0,0,0,0.1);
+}
+.bottom-controls button {
+    margin: 5px;
+}
+
+
+.delete-btn {
+    background-color: red;
+}
+.thumbnail input[type="checkbox"] {
+    position: absolute;
+    bottom: 5px;
+    right: 5px;
+    width: 20px; /* Adjust checkbox size as needed */
+    height: 20px; /* Adjust checkbox size as needed */
+    cursor: pointer;
+    z-index: 2; /* Ensure checkbox appears above the image */
+    opacity: 1; /* Make checkbox invisible by default */
+}
+
+.thumbnail:hover input[type="checkbox"] {
+    opacity: 1; /* Show checkbox on hover */
+}
+
+.enlarged-img-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.7); /* Semi-transparent background */
+    display: none; /* Initially hidden */
+    justify-content: center;
+    align-items: center;
+    z-index: 9999; /* Ensure it's above other content */
+}
+
+.enlarged-img-container.active {
+    display: flex; /* Show when active */
+}
+
+.enlarged-img-container img {
+    max-width: 80%;
+    max-height: 80%;
+}
+
+/* Scale the image on hover */
+.thumbnail:hover img {
+    transform: scale(1.05);
+}
+
+.pagination {
+    display: flex;
+    justify-content: center;
+    margin-top: 20px;
+}
+
+.pagination button {
+    margin: 0 5px;
+    padding: 10px 15px;
+    border: 1px solid #ddd;
+    background-color: #f9f9f9;
+    cursor: pointer;
+}
+
+.pagination button.active {
+    background-color: #007bff;
+    color: white;
+}
+
+.pagination button:hover {
+    background-color: #ddd;
+}
+</style>
+</head>
+<body>
+    <div style="text-align: center; margin-bottom: 20px;">
+    <form action="{{ request.scope.root_path }}/" method="get">
+        <button style="padding: 10px 20px; font-size: 16px;">🔙 Back to Dashboard</button>
+    </form>
+</div>
+<label for="item/Pg" class="label">Items per page:</label>
+<select id="itemsPerPage" class="label" onchange="changeItemsPerPage()">
+    <option value="25">25</option>
+    <option value="50" selected>50</option>
+    <option value="75">75</option>
+    <option value="100">100</option>
+</select>
+
+<div id="thumbnails"></div>
+
+<div id="enlargedImgContainer" class="enlarged-img-container" onclick="hideEnlargedImg()">
+    <img id="enlargedImg" src="" alt="Enlarged Image">
+</div>
+
+<div id="bottomControls" class="bottom-controls">
+    <button onclick="selectAll()">Select All</button>
+    <button onclick="deselectAll()">DeSelect All</button>
+    <button class="delete-btn" onclick="deleteSelected()">Delete Selected</button>
+</div>
+
+<div class="pagination" id="pagination"></div>
+
+<script>
+const ROOT_PATH = "{{ request.scope.root_path }}";
+let imagesPerPage = parseInt(document.getElementById('itemsPerPage')?.value) || 50;
+
+let currentPage = 1;
+let images = [];
+
+window.onload = function() {
+    // Fetch images from the server using AJAX
+    fetch(`${ROOT_PATH}/get_images`)
+        .then(response => response.json())
+        .then(data => {
+            images = data;
+            displayImages();
+            setupPagination();
+        })
+        .catch(error => console.error('Error fetching images:', error));
+};
+
+function updateBottomControlsVisibility(totalPages, itemCount) {
+    const bottomControls = document.getElementById("bottomControls");
+    bottomControls.style.display = itemCount > 0 ? "block" : "none";
+}
+
+
+function displayImages() {
+    const start = (currentPage - 1) * imagesPerPage;
+    const end = start + imagesPerPage;
+    const currentImages = images.slice(start, end);
+
+    const thumbnailsContainer = document.getElementById('thumbnails');
+    thumbnailsContainer.innerHTML = '';
+
+    currentImages.forEach(image => {
+        const img = document.createElement('img');
+        img.src = image;
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.value = image;
+        checkbox.name = 'delete';
+        const thumbnail = document.createElement('div');
+        thumbnail.classList.add('thumbnail');
+        thumbnail.appendChild(checkbox); // Add checkbox before image
+        thumbnail.appendChild(img);
+        thumbnailsContainer.appendChild(thumbnail);
+
+        // Add event listener for click to display enlarged image
+        img.addEventListener('click', function() {
+            showEnlargedImg(image);
+        });
+    });
+}
+
+function setupPagination() {
+    const totalPages = Math.ceil(images.length / imagesPerPage);
+    updateBottomControlsVisibility(totalPages, images.length);
+
+    const paginationContainer = document.getElementById('pagination');
+    paginationContainer.innerHTML = '';
+
+    for (let i = 1; i <= totalPages; i++) {
+        const button = document.createElement('button');
+        button.innerText = i;
+        button.addEventListener('click', function() {
+            currentPage = i;
+            displayImages();
+            updatePagination();
+        });
+        if (i === currentPage) {
+            button.classList.add('active');
+        }
+        paginationContainer.appendChild(button);
+    }
+}
+
+function updatePagination() {
+    const buttons = document.querySelectorAll('.pagination button');
+    buttons.forEach(button => {
+        button.classList.remove('active');
+        if (parseInt(button.innerText) === currentPage) {
+            button.classList.add('active');
+        }
+    });
+}
+
+function showEnlargedImg(imageSrc) {
+    const enlargedImg = document.getElementById('enlargedImg');
+    enlargedImg.src = imageSrc;
+    const enlargedImgContainer = document.getElementById('enlargedImgContainer');
+    enlargedImgContainer.classList.add('active');
+}
+
+function hideEnlargedImg() {
+    const enlargedImgContainer = document.getElementById('enlargedImgContainer');
+    enlargedImgContainer.classList.remove('active');
+}
+
+function selectAll() {
+    const checkboxes = document.querySelectorAll('input[name=delete]');
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = true;
+    });
+}
+
+function deselectAll() {
+    const checkboxes = document.querySelectorAll('input[name=delete]');
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = false;
+    });
+}
+
+function deleteSelected() {
+    const checkboxes = document.querySelectorAll('input[name=delete]:checked');
+    const selectedImages = Array.from(checkboxes).map(checkbox => checkbox.value);
+
+    if (selectedImages.length === 0) {
+        alert('Please select images to delete.');
+    } else {
+        if (confirm("Are you sure you want to delete the selected images?")) {
+            fetch(`${ROOT_PATH}/delete_images`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ urls: selectedImages })
+            })
+            .then(response => {
+                if (response.ok) {
+                    location.reload(); // Refresh the page after deletion
+                } else {
+                    console.error('Failed to delete images:', response.statusText);
+                }
+            })
+            .catch(error => console.error('Error deleting images:', error));
+        }
+    }
+}
+function changeItemsPerPage() {
+    const select = document.getElementById('itemsPerPage');
+    imagesPerPage = parseInt(select.value);
+    currentPage = 1;
+    displayImages();
+    setupPagination();
+}
+
+</script>
+</body>
+</html>
+

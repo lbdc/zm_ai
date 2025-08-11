@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZoneMinder AI Dashboard</title>
+    <style>
+        /* Base styles */
+        body {
+            font-family: Arial, sans-serif;
+            margin: 15px;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 1.6em;
+        }
+
+        /* Status Section */
+        .status-wrapper {
+            text-align: center;
+            margin-bottom: 15px;.src
+        }
+
+        .status-table {
+            margin: 0 auto;
+            border-collapse: collapse;
+            font-size: 14px;
+            width: 100%;
+            max-width: 500px;
+        }
+
+        .status-table th,
+        .status-table td {
+            padding: 4px 6px;
+            border-bottom: 1px solid #ccc;
+            text-align: center;
+            word-break: break-word;
+        }
+
+        /* Control Buttons */
+        .control-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+
+        .control-buttons form {
+            margin: 0;
+        }
+
+        button.control-button,
+        select.control-button {
+            padding: 4px 6px;
+            font-size: 12px;
+            width: 100x;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            background-color: #f0f0f0;
+            cursor: pointer;
+            font-family: inherit;
+            color: black
+        }
+
+        /* Optional: style select dropdown arrow */
+        select.control-button {
+            appearance: none;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg%20viewBox%3D%220%200%204%205%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%3E%3Cpath%20d%3D%22M2%200L0%202h4L2%200z%22%20fill%3D%22%23000%22/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 8px center;
+            background-size: 8px 10px;
+            padding-right: 24px;
+            color: black
+        }
+
+        /* Image and Log Sections */
+        .image-section,
+        .log-section {
+            border: 2px solid #ccc;
+            border-radius: 5px;
+            padding: 10px;
+            background-color: #f9f9f9;
+            margin-bottom: 20px;
+            max-height: 70vh;
+            overflow: auto;
+        }
+
+        .thumbs {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .thumbs img {
+            height: 100px;
+            margin: 4px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+        }
+
+        pre {
+            background-color: #f4f4f4;
+            padding: 8px;
+            border: 1px solid #ddd;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-size: 13px;
+        }
+
+        .log-footer {
+            text-align: center;
+            margin-top: 10px;
+        }
+
+        /* Responsive */
+        @media screen and (max-width: 600px) {
+            h1 {
+                font-size: 1.4em;
+            }
+
+            .status-table {
+                font-size: 13px;
+            }
+
+            .thumbs img {
+                height: 80px;
+            }
+
+            .control-buttons button,
+            .control-buttons select {
+                width: 100%;
+                font-size: 13px;
+            }
+        }
+        
+    .dropdown {
+        position: relative;
+        display: inline-block;
+        font-family: inherit;
+    }
+
+    /* Match parent control-button */
+    .control-button {
+        padding: 4px 8px;
+        font-size: 14px;
+        cursor: pointer;
+        background-color: #f0f0f0;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        line-height: 1.2em;
+    }
+
+    /* Dropdown menu styling */
+    .dropdown-content {
+        display: none;
+        position: absolute;
+        background-color: #fff;
+        min-width: 120px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.15);
+        z-index: 1000;
+        padding: 2px 0;
+    }
+
+    /* Dropdown links match button style */
+    .dropdown-content a {
+        color: #333;
+        padding: 4px 8px;
+        font-size: 14px;
+        line-height: 1.2em;
+        text-decoration: none;
+        display: block;
+    }
+
+    .dropdown-content a:hover {
+        background-color: #eee;
+    }
+
+    /* Show menu on hover */
+    .dropdown:hover .dropdown-content {
+        display: block;
+    }
+    </style>
+
+</head>
+<body>
+
+<h1>ZoneMinder AI Detection</h1>
+    {% if saved %}
+      <div style="background: #ffeeba; color: #856404; padding: 10px; margin-bottom: 15px; border: 1px solid #ffeeba; border-radius: 5px;">
+        ✅ Settings saved. Please restart the scripts for changes to take effect.
+      </div>
+    {% endif %}
+<div class="status-wrapper">
+    <h3>Process Status</h3>
+    <table class="status-table">
+        <thead>
+            <tr>
+                <th>Script</th>
+                <th>PID</th>
+                <th>Status</th>
+                <th>Control</th>
+            </tr>
+        </thead>
+        <tbody id="status-body">
+            {% for proc in detector_status %}
+            <tr>
+                <td>{{ proc.script }}</td>
+                <td>{{ proc.pid }}</td>
+                <td style="color: {{ 'green' if proc.running else 'red' }}">
+                    {{ '🟢 Running' if proc.running else '🔴 Not Running' }}
+                </td>
+                <td>
+                    <form method="post" action="{{ request.url_for('start_script', script_name=proc.script) }}" style="display:inline;">
+                        <button type="submit" style="font-size: 12px;">▶️ Start</button>
+                    </form>
+                    <form method="post" action="{{ request.url_for('stop_script', script_name=proc.script) }}" style="display:inline;">
+                        <button type="submit" style="font-size: 12px;">⏹️ Stop</button>
+                    </form>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4">No PID file found or nothing running.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+
+<div class="control-buttons">
+    <!-- Start/Stop Dropdown -->
+    <form id="controlForm">
+        <select class="control-button" onchange="goToAction(this.value)">
+            <option disabled selected>🕹️ Control</option>
+            <option value="{{ request.scope.root_path }}/start">▶️ Start</option>
+            <option value="{{ request.scope.root_path }}/stop">⏹️ Stop</option>
+        </select>
+    </form>
+
+    <!-- Remaining Buttons -->
+    <form action="{{ request.scope.root_path }}/gallery">
+        <button type="submit" class="control-button">📸 Detected</button>
+    </form>
+    <form action="{{ request.scope.root_path }}/edit_settings">
+        <button type="submit" class="control-button">⚙️ Settings</button>
+    </form>
+    <form action="{{ ZM_HOST }}/zm" target="_blank">
+        <button type="submit" class="control-button">🔗 ZM</button>
+    </form>
+
+    <!-- Montage Dropdown Button -->
+    <div class="dropdown">
+        <button type="button" class="control-button">🎞️ Cam ▾</button>
+        <div class="dropdown-content">
+            <a href="{{ request.scope.root_path }}/montage">🎞️ Mjpeg</a>
+            <a href="{{ request.scope.root_path }}/montage_snapshot">📷 Snap</a>
+        </div>
+    </div>
+</div>
+
+<script>
+function goToAction(url) {
+    if (url) {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = url;
+        document.body.appendChild(form);
+        form.submit();
+    }
+}
+
+function goToMontage(url) {
+    if (url) window.location.href = url;
+}
+</script>
+
+
+
+<div class="image-section">
+    <h3>🖼️ Detected Frames (Most recent 25)</h3>
+        <div class="thumbs">
+            {% for img in thumbs %}
+                <a href="{{ img.url }}" target="_blank">
+                    <img src="{{ img.url }}" style="height: 100px;">
+                </a>
+            {% endfor %}
+        </div>
+</div>
+
+<div class="log-section">
+    {% for script, content in logs.items() %}
+    <details style="margin-bottom: 1em;">
+        <summary><strong>{{ script }}</strong></summary>
+            <div id="log-{{ script }}" style="white-space: pre-wrap; font-family: monospace; margin-top: 0; padding-top: 0;">
+                {{- content|safe -}}
+            </div>
+    </details>
+    {% endfor %}
+
+</div>
+
+<script>
+    const ROOT_PATH = "{{ request.scope.root_path }}";
+    function fetchLogs() {
+        fetch(`${location.protocol}//${location.host}{{ request.scope.root_path }}/get_logs`)
+            .then(response => response.json())
+            .then(data => {
+                for (const [script, content] of Object.entries(data)) {
+                    const el = document.getElementById("log-" + script);
+                    if (el) {
+                        el.innerHTML = content;
+                        el.scrollTop = el.scrollHeight;
+                    }
+                }
+            });
+    }
+
+    document.addEventListener("DOMContentLoaded", fetchLogs);
+    setInterval(fetchLogs, 10000);
+
+    document.addEventListener("DOMContentLoaded", refreshThumbnails);
+    setInterval(refreshThumbnails, 10000);
+
+    function arraysAreEqual(a1, a2) {
+        return a1.length === a2.length && a1.every((v, i) => v === a2[i]);
+    }
+
+    function refreshThumbnails() {
+        fetch(`${location.protocol}//${location.host}${ROOT_PATH}/get_images`)
+            .then(response => response.json())
+            .then(newImages => {
+                const thumbsDiv = document.querySelector(".thumbs");
+                if (!thumbsDiv) return;
+
+                const maxCount = 25;
+                const cleanedNew = newImages
+                    .slice(0, maxCount)
+                    .map(url =>
+                        location.protocol === "https:" && url.startsWith("http://")
+                            ? url.replace("http://", "https://")
+                            : url
+                    );
+
+                const currentImgs = Array.from(thumbsDiv.querySelectorAll("img"));
+                const currentUrls = currentImgs.map(img => img.src);
+
+                // Skip update if URLs are exactly the same
+                if (arraysAreEqual(currentUrls, cleanedNew)) return;
+
+                // Track existing <a> elements for reuse or removal
+                const existingLinks = Array.from(thumbsDiv.querySelectorAll("a"));
+                const urlToLinkMap = new Map();
+                existingLinks.forEach(link => {
+                    const img = link.querySelector("img");
+                    if (img) urlToLinkMap.set(img.src, link);
+                });
+
+                // Clear container and rebuild with preserved elements
+                thumbsDiv.innerHTML = "";
+                cleanedNew.reverse().forEach(url => {
+                    let link = urlToLinkMap.get(url);
+                    if (!link) {
+                        // New image
+                        link = document.createElement("a");
+                        link.href = url;
+                        link.target = "_blank";
+
+                        const img = document.createElement("img");
+                        img.src = url;
+                        img.style.height = "100px";
+                        img.style.margin = "4px";
+                        img.style.border = "1px solid #ccc";
+                        img.style.borderRadius = "3px";
+                        img.loading = "lazy";
+                        img.style.opacity = "0";
+                        img.onload = () => (img.style.opacity = "1");
+                        img.style.transition = "opacity 0.3s ease";
+
+                        link.appendChild(img);
+                    }
+
+                    thumbsDiv.appendChild(link);
+                });
+            });
+    }
+
+
+
+    async function refreshStatus() {
+        try {
+            const res = await fetch(`${location.protocol}//${location.host}${ROOT_PATH}/get_status`);
+            const data = await res.json();
+
+            const tbody = document.getElementById("status-body");
+            tbody.innerHTML = "";
+
+            data.forEach(proc => {
+                const row = document.createElement("tr");
+                row.innerHTML = `
+                    <td>${proc.script}</td>
+                    <td>${proc.pid}</td>
+                    <td style="color: ${proc.running ? 'green' : 'red'}">
+                        ${proc.running ? '🟢 Running' : '🔴 Not Running'}
+                    </td>
+                    <td>
+                        <form method="post" action="${ROOT_PATH}/start/${proc.script}" style="display:inline;">
+                            <button type="submit" style="font-size: 12px;">▶️ Start</button>
+                        </form>
+                        <form method="post" action="${ROOT_PATH}/stop/${proc.script}" style="display:inline;">
+                            <button type="submit" style="font-size: 12px;">⏹️ Stop</button>
+                        </form>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        } catch (e) {
+            console.error("⚠️ Failed to refresh status:", e);
+        }
+    }
+
+    setInterval(refreshStatus, 10000);
+    refreshStatus();
+
+</script>
+
+
+
+</body>
+</html>

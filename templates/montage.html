@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ZM Montage</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: sans-serif;
+            background-color: white;
+        }
+
+        .camera-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 2px;
+            padding: 2px;
+            align-items: stretch;
+        }
+
+        .camera-tile {
+            position: relative;
+            background-color: black;
+            border: 1px solid #444;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        canvas {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .overlay-icons {
+            position: absolute;
+            top: 5px;
+            left: 5px;
+            z-index: 10;
+            display: flex;
+            gap: 5px;
+            font-size: 18px;
+            color: white;
+            background: rgba(0, 0, 0, 0.4);
+            padding: 2px 5px;
+            border-radius: 4px;
+            opacity: 0.6;
+            transition: opacity 0.2s ease;
+        }
+
+        .overlay-icons:hover {
+            opacity: 1.0;
+        }
+
+        .control-row {
+            margin: 6px;
+        }
+
+        .cam-toggle-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            padding: 6px;
+        }
+
+        .cam-toggle-btn {
+            padding: 4px 8px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .cam-toggle-btn.dragging {
+            opacity: 0.5;
+        }
+    </style>
+</head>
+<body>
+    <h1 style="margin: 4px;">📷 ZoneMinder Camera Montage</h1>
+
+    <div class="cam-toggle-bar" id="camToggleBar">
+        {% for cam in cameras %}
+        <button class="cam-toggle-btn" data-camid="{{ cam.cam_id }}" draggable="true">{{ cam.name }}</button>
+        {% endfor %}
+    </div>
+
+    <div class="control-row">
+        <label for="scaleRange">Scale:</label>
+        <input type="range" id="scaleRange" min="10" max="100" step="10">
+        <span id="scaleLabel">50%</span>
+        <button onclick="applyScale()">🔁 Scale</button>
+
+        &nbsp;&nbsp;&nbsp;
+
+        <label for="columns">Columns:</label>
+        <button onclick="adjustCols(-1)">➖</button>
+        <button onclick="adjustCols(1)">➕</button>
+        <span id="colLabel">3 columns</span>
+
+        <button onclick="resetSettings()" style="margin-left: 20px; background-color: #f44336; color: white;">🗑 Reset All</button>
+    </div>
+
+    <hr style="margin: 6px 0;">
+
+    <div class="camera-grid" id="cameraGrid">
+        {% for cam in cameras %}
+        <div class="camera-tile" data-camid="{{ cam.cam_id }}">
+            <div class="overlay-icons">
+                {% if cam.analysing %}<span title="Detection Enabled">👁️</span>{% endif %}
+                {% if cam.email_enabled %}<span title="Email Enabled">✉️</span>{% endif %}
+            </div>
+            <canvas data-cam="{{ cam.cam_id }}"></canvas>
+        </div>
+        {% endfor %}
+    </div>
+
+    <script>
+    function setCookie(name, value, days = 365) {
+        const expires = new Date(Date.now() + days*864e5).toUTCString();
+        document.cookie = `${name}=${encodeURIComponent(value)}; expires=${expires}; path=/`;
+    }
+
+    function getCookie(name) {
+        return document.cookie.split('; ').reduce((r, v) => {
+            const parts = v.split('=');
+            return parts[0] === name ? decodeURIComponent(parts[1]) : r
+        }, null);
+    }
+    function getHiddenCams() {
+        const raw = getCookie("hiddenCams");
+        return raw ? raw.split(',') : [];
+    }
+
+    function saveHiddenCams(list) {
+        setCookie("hiddenCams", list.join(','));
+    }
+
+    let currentScale = parseInt(getCookie("mjpegScale")) || 50;
+    let currentCols = parseInt(getCookie("mjpegCols")) || 3;
+    const activeStreams = {};
+
+    function buildMJPEGStreamUrl(camId) {
+        return `/zm_ai/montage/mjpeg/${camId}?scale=${currentScale}`;
+    }
+
+    function startCanvasStream(camId) {
+        const canvas = document.querySelector(`canvas[data-cam='${camId}']`);
+        if (!canvas || activeStreams[camId]) return;
+        const ctx = canvas.getContext('2d');
+        const url = buildMJPEGStreamUrl(camId);
+
+        fetch(url).then(response => {
+            const reader = response.body.getReader();
+            let buffer = new Uint8Array();
+            activeStreams[camId] = reader;
+
+            let lastFrameTime = 0;
+
+            function findJpeg(data) {
+                for (let i = 0; i < data.length - 1; i++) {
+                    if (data[i] === 0xFF && data[i + 1] === 0xD8) {
+                        for (let j = i + 2; j < data.length - 1; j++) {
+                            if (data[j] === 0xFF && data[j + 1] === 0xD9) {
+                                return [i, j + 2];
+                            }
+                        }
+                    }
+                }
+                return [-1, -1];
+            }
+
+            function read() {
+                reader.read().then(({ done, value }) => {
+                    if (done || !activeStreams[camId]) return;
+                    if (value) {
+                        const newBuffer = new Uint8Array(buffer.length + value.length);
+                        newBuffer.set(buffer);
+                        newBuffer.set(value, buffer.length);
+                        buffer = newBuffer;
+
+                        let [start, end] = findJpeg(buffer);
+                        const now = performance.now();
+                        if (start !== -1 && end !== -1 && now - lastFrameTime > 1000) {
+                            lastFrameTime = now;
+                            const jpegData = buffer.slice(start, end);
+                            buffer = buffer.slice(end);
+
+                            const blob = new Blob([jpegData], { type: 'image/jpeg' });
+                            createImageBitmap(blob).then(bitmap => {
+                                canvas.width = bitmap.width * (currentScale / 100);
+                                canvas.height = bitmap.height * (currentScale / 100);
+                                ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+                            }).catch(err => console.warn("Bitmap decode error", err));
+                        }
+                    }
+                    read();
+                }).catch(err => {
+                    console.error("Stream read error for cam", camId, err);
+                    stopCanvasStream(camId);
+                });
+            }
+
+            read();
+        }).catch(err => {
+            console.error("Fetch failed for cam", camId, err);
+        });
+    }
+
+    function stopCanvasStream(camId) {
+        if (activeStreams[camId]) {
+            activeStreams[camId].cancel();
+            delete activeStreams[camId];
+        }
+    }
+
+    function applyScale() {
+        setCookie("mjpegScale", currentScale);
+        location.reload();
+    }
+
+    function adjustCols(delta) {
+        currentCols = Math.max(1, currentCols + delta);
+        setCookie("mjpegCols", currentCols);
+        const grid = document.querySelector('.camera-grid');
+        grid.style.gridTemplateColumns = `repeat(${currentCols}, 1fr)`;
+        document.getElementById('colLabel').textContent = `${currentCols} column${currentCols > 1 ? 's' : ''}`;
+    }
+
+    function resetSettings() {
+        ["mjpegScale", "mjpegCols", "camOrder", "hiddenCams"].forEach(name => {
+            document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
+        });
+        location.reload();
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const savedOrder = getCookie("camOrder");
+        if (savedOrder) {
+            const camOrder = savedOrder.split(',');
+            const toggleBar = document.getElementById('camToggleBar');
+            const cameraGrid = document.getElementById('cameraGrid');
+
+            camOrder.forEach(camId => {
+                const btn = toggleBar.querySelector(`.cam-toggle-btn[data-camid='${camId}']`);
+                if (btn) toggleBar.appendChild(btn);
+
+                const tile = cameraGrid.querySelector(`.camera-tile[data-camid='${camId}']`);
+                if (tile) cameraGrid.appendChild(tile);
+            });
+        }
+    });
+
+    window.onbeforeunload = () => {
+        // Stop all canvas MJPEG streams when leaving page
+        Object.keys(activeStreams).forEach(camId => stopCanvasStream(camId));
+    };
+
+
+    window.onload = function () {
+        document.getElementById('scaleRange').value = currentScale;
+        document.getElementById('scaleLabel').textContent = `${currentScale}%`;
+        adjustCols(0);
+
+        document.getElementById('scaleRange').addEventListener('input', function () {
+            currentScale = parseInt(this.value);
+            document.getElementById('scaleLabel').textContent = `${currentScale}%`;
+        });
+
+        document.querySelectorAll(".cam-toggle-btn").forEach(btn => {
+            const camId = btn.dataset.camid;
+            const tile = document.querySelector(`.camera-tile[data-camid='${camId}']`);
+            const hiddenCams = getHiddenCams();
+            const isVisible = !hiddenCams.includes(camId);
+
+            // Set initial state
+            tile.style.display = isVisible ? 'flex' : 'none';
+            btn.style.backgroundColor = isVisible ? "#4CAF50" : "#ccc";
+            btn.style.color = isVisible ? "white" : "black";
+
+            if (isVisible) startCanvasStream(camId);
+
+            // Attach toggle click handler
+            btn.addEventListener("click", () => {
+                const currentlyVisible = tile.style.display !== 'none';
+                const updatedHiddenCams = getHiddenCams();
+
+                if (currentlyVisible) {
+                    tile.style.display = 'none';
+                    stopCanvasStream(camId);
+                    btn.style.backgroundColor = "#ccc";
+                    btn.style.color = "black";
+                    if (!updatedHiddenCams.includes(camId)) updatedHiddenCams.push(camId);
+                } else {
+                    tile.style.display = 'flex';
+                    startCanvasStream(camId);
+                    btn.style.backgroundColor = "#4CAF50";
+                    btn.style.color = "white";
+                    const index = updatedHiddenCams.indexOf(camId);
+                    if (index !== -1) updatedHiddenCams.splice(index, 1);
+                }
+
+                saveHiddenCams(updatedHiddenCams);
+            });
+        });
+    }
+    let draggedBtn = null;
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const toggleBar = document.getElementById('camToggleBar');
+
+        toggleBar.addEventListener('dragstart', e => {
+            if (e.target.classList.contains('cam-toggle-btn')) {
+                draggedBtn = e.target;
+                draggedBtn.classList.add("dragging");
+                e.dataTransfer.effectAllowed = "move";
+            }
+        });
+
+        toggleBar.addEventListener('dragend', () => {
+            if (draggedBtn) {
+                draggedBtn.classList.remove("dragging");
+                draggedBtn = null;
+            }
+        });
+
+        toggleBar.addEventListener('dragover', e => {
+            e.preventDefault();
+            const afterElement = getDragAfterElement(toggleBar, e.clientX);
+            const current = draggedBtn;
+            if (afterElement == null) {
+                toggleBar.appendChild(current);
+            } else {
+                toggleBar.insertBefore(current, afterElement);
+            }
+        });
+
+        toggleBar.addEventListener('drop', () => {
+            reorderCameraTiles();
+        });
+    });
+
+    function getDragAfterElement(container, x) {
+        const draggableElements = [...container.querySelectorAll('.cam-toggle-btn:not(.dragging)')];
+
+        return draggableElements.reduce((closest, child) => {
+            const box = child.getBoundingClientRect();
+            const offset = x - box.left - box.width / 2;
+            if (offset < 0 && offset > closest.offset) {
+                return { offset: offset, element: child };
+            } else {
+                return closest;
+            }
+        }, { offset: Number.NEGATIVE_INFINITY }).element;
+    }
+
+    function reorderCameraTiles() {
+        const toggleBar = document.getElementById('camToggleBar');
+        const cameraGrid = document.getElementById('cameraGrid');
+
+        const newOrder = [...toggleBar.querySelectorAll('.cam-toggle-btn')]
+            .map(btn => btn.dataset.camid);
+
+        // Save order to cookie
+        setCookie("camOrder", newOrder.join(','));
+
+        newOrder.forEach(camId => {
+            const tile = cameraGrid.querySelector(`.camera-tile[data-camid='${camId}']`);
+            if (tile) {
+                cameraGrid.appendChild(tile);
+            }
+        });
+    }
+
+
+    </script>
+</body>
+</html>
