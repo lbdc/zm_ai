@@ -57,18 +57,18 @@ SETTINGS.INI
 mon_camid = 1,2,3 # Cameras to monitor\
 zm_host = https://192.168.1.10:443 # host of zoneminder machine. Assumes /zm and /zm/api. Can be http or https, any ports\
 log_enable = True\
-log_retention_days = 1\
+log_retention_days = 1
 
 [paths] # Folders relative to location of python scripts\
 zm_alarm_queue = to_be_processed\
 zm_ai_detections_dir = detected_frames\
-yolo_config_path = yolo\
+yolo_config_path = yolo
 
 [credentials]\
 zm_user = zm_user # Zoneminder use_auth\
 zm_pass = zm_pass\
 bauth_user = bauth_user # apache basic auth\
-bauth_pwd = bauth_pass\
+bauth_pwd = bauth_pass
 
 [detection]\
 use_gpu = True # always true, not used\
@@ -76,11 +76,11 @@ use_box = True\
 confidence_threshold = 0.80\
 obj_list = person, bird, cat, dog # from coco.txt\
 threshold = 10 # will skip analyzing events if rate exceeds threshold/time_window (e.g. 10 Events/60s)\
-time_window = 60\
+time_window = 60
 
 [email]\
 email_batch_interval = 60 (wait in seconds before emailing. Prevents getting bunch of emails.\
-email_camid = 2\
+email_camid = 2
 
 
 <VirtualHost *:443>
