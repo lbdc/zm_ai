@@ -112,10 +112,16 @@ def extract_ids(video_path):
 def process_video(video_path, model, camid, event_id):
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
-    fps = cap.get(cv2.CAP_PROP_FPS)
+    try:
+        # handle NaN, None, or weird low values
+        if not fps or fps != fps or fps < 1:
+            fps = 1.0
+    except Exception:
+        fps = 1.0
+        
     if fps <= 0:
         raise ValueError(f"Invalid FPS ({fps}) for {video_path}")
-    frame_interval = int(fps)  # Process 1 frame per second (adjust as needed)
+    frame_interval = max(1, int(round(fps)))  # Process 1 frame per second (adjust as needed)
 
     # Store the best detection for each object across all frames
     best_detections = {}
