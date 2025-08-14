@@ -46,10 +46,17 @@ This will download all pip requirements, pytorch and yolo8 (ultralytics) and act
 2) Start the script
 Review settings.ini and email_settings.ini to match your installation (or do this later through the front end)
 
-execute start_zm_ai.(ps1|sh)
+   Windows (PowerShell / Windows Terminal)  
+   ```powershell
+   start_zm_ai.ps1
+   ```
 
+   Ubuntu Linux  
+   ```bash
+   bash start_zm_ai.sh
+   ```
 This will activate the python environment and execute the zm_ai.py script. 
-All other script should start automatically and be manage from the dashboard.
+All other script should start automatically and be managed from the dashboard.
 
 3) Go to your browser and enter http://localhost:8001/zm_ai
 *** Adjust settings as required.
@@ -87,6 +94,8 @@ time_window = 60
 [email]\
 email_batch_interval = 60 (wait in seconds before emailing. Prevents getting bunch of emails.\
 email_camid = 2
+
+### If you want to reverse proxy through https, apache configuration below 
 
 ```apache
 <VirtualHost *:443>
