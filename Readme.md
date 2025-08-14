@@ -27,11 +27,17 @@ The dashboard also includes:
 ![Main UI](images/montage.jpg)
 
 ### SETUP
-1) Setup in a folder say zm_ai:
-setup_zm_ai.ps1 (windows terminal/powershell)
-or
-./bash setup_zm_ai.sh (Ubuntu Linux)
+1) Setup in a folder say `zm_ai`:
 
+   Windows (PowerShell / Windows Terminal)  
+   ```powershell
+   setup_zm_ai.ps1
+   ```
+
+   Ubuntu Linux  
+   ```bash
+   ./bash setup_zm_ai.sh
+   ```
 Recommend to install python 3.10 - 3.12
 
 This will download all pip requirements, pytorch and yolo8 (ultralytics) and activate the python environment
