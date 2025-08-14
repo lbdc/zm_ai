@@ -82,7 +82,7 @@ time_window = 60
 email_batch_interval = 60 (wait in seconds before emailing. Prevents getting bunch of emails.\
 email_camid = 2
 
-
+```apache
 <VirtualHost *:443>
     ProxyPreserveHost On
     RewriteEngine on
@@ -101,5 +101,6 @@ email_camid = 2
     ProxyPassReverse /zm_ai http://192.168.1.XXX:YYYY/zm_ai
 
 </VirtualHost>
+```
 
 *** I am not a programmer so constructive comments welcomed.
