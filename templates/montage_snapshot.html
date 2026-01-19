@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ZM Snapshot Montage</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: sans-serif;
+            background-color: white;
+        }
+
+        .camera-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 2px;
+            padding: 2px;
+            align-items: stretch;
+        }
+
+        .camera-tile {
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: black;
+            border: 1px solid #444;
+            overflow: hidden;
+        }
+        .camera-tile img {
+            width: 100%;
+            height: auto;
+            object-fit: contain;
+            display: block;
+        }
+        .overlay-icons {
+            position: absolute;
+            top: 5px;
+            left: 5px;
+            z-index: 10;
+            display: flex;
+            gap: 5px;
+            font-size: 18px;
+            color: white;
+            background: rgba(0, 0, 0, 0.4);
+            padding: 2px 5px;
+            border-radius: 4px;
+            opacity: 0.6;
+            transition: opacity 0.2s ease;
+        }
+        .overlay-icons:hover {
+            opacity: 1.0;
+        }
+        .overlay-icons a{
+            color: inherit;
+            text-decoration: none;
+            cursor: pointer;
+            padding: 2px 4px;
+            border-radius: 4px;
+          }
+        .overlay-icons a:hover{
+            background: rgba(255,255,255,0.15);
+          }
+        .cam-toggle-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            padding: 6px;
+        }
+        .cam-toggle-btn {
+            padding: 4px 8px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .cam-toggle-btn.dragging {
+            opacity: 0.5;
+        }
+
+        h1, label, select {
+            margin: 4px;
+            font-size: 14px;
+        }
+        .control-row {
+            display: flex;
+            align-items: center;  /* Vertically center items */
+            gap: 10px;  /* Add some space between buttons */
+        }
+
+        .control-button {
+            padding: 2px 4px;
+            border-radius: 4px;
+            border: 1px solid;
+            cursor: pointer;
+            font-size: 14px;
+            display: inline-flex;
+            align-items: center;
+            height: 25px;
+        }
+
+
+    </style>
+</head>
+<body>
+
+<h1 style="margin: 4px;">🖼️ Snapshot Montage</h1>
+
+<div class="cam-toggle-bar">
+    {% for cam in cameras %}
+    <button class="cam-toggle-btn" data-camid="{{ cam.cam_id }}">{{ cam.name }}</button>
+    {% endfor %}
+</div>
+
+<div class="control-row">
+    <label for="scaleRange">Scale:</label>
+    <input type="range" id="scaleRange" min="10" max="100" step="10">
+    <span id="scaleLabel">100%</span>
+
+    &nbsp;&nbsp;&nbsp;
+
+    <label for="columns">Columns:</label>
+    <button onclick="adjustCols(-1)">➖</button>
+    <button onclick="adjustCols(1)">➕</button>
+    <span id="colLabel">3 columns</span>
+
+    <button onclick="resetSettings()" class="control-button" style="background-color: #f44336;">🧹 Reset All</button>
+</div>
+
+<hr style="margin: 6px 0;">
+
+<div class="camera-grid" id="cameraGrid">
+  {% for cam in cameras %}
+    <div class="camera-tile" data-camid="{{ cam.cam_id }}">
+        <div class="overlay-icons">
+            <a href="#"
+               class="open-live"
+               data-src="{{ cam.name }}"
+               title="Open live stream">📺</a>
+        </div>
+
+
+      <img class="snapshot-cam" data-cam="{{ cam.cam_id }}" alt="{{ cam.name }}">
+    </div>
+  {% endfor %}
+</div>
+
+
+
+
+<script>
+    let currentScale = parseInt(getCookie("snapshotScale")) || 100;
+    let currentCols = parseInt(getCookie("snapshotCols")) || 3;
+
+    function setCookie(name, value, days = 365) {
+        const expires = new Date(Date.now() + days*864e5).toUTCString();
+        document.cookie = name + '=' + encodeURIComponent(value) + '; expires=' + expires + '; path=/';
+    }
+
+    function getCookie(name) {
+        return document.cookie.split('; ').reduce((r, v) => {
+            const parts = v.split('=');
+            return parts[0] === name ? decodeURIComponent(parts[1]) : r
+        }, null);
+    }
+
+    function resetSettings() {
+        ["snapshotScale", "snapshotCols", "visibleCams", "camOrder"].forEach(name => {
+            document.cookie = name + "=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+        });
+        location.reload();
+    }
+
+    function buildSnapshotUrl(camId) {
+      const base = "{{ request.scope.root_path }}"; // "/zm_ai"
+      return `${base}/montage/snapshot/${camId}?scale=${currentScale}&t=${Date.now()}`;
+    }
+
+    function refreshSnapshots() {
+        const visible = new Set(getVisibleCams().map(String)); // parse cookie once
+
+        document.querySelectorAll(".snapshot-cam").forEach(img => {
+            const camId = String(img.dataset.cam);
+            if (visible.has(camId)) {
+                img.src = buildSnapshotUrl(camId);
+            }
+        });
+    }
+
+    function getVisibleCams() {
+        const saved = getCookie("visibleCams");
+        if (!saved) {
+            const all = Array.from(document.querySelectorAll(".snapshot-cam")).map(el => el.dataset.cam);
+            setCookie("visibleCams", JSON.stringify(all));
+            return all;
+        }
+        return JSON.parse(saved);
+    }
+
+    function setVisibleCams(camList) {
+        setCookie("visibleCams", JSON.stringify(camList));
+    }
+
+    function getCamOrder() {
+        const saved = getCookie("camOrder");
+        if (!saved) {
+            const all = Array.from(document.querySelectorAll(".cam-toggle-btn")).map(btn => btn.dataset.camid);
+            setCookie("camOrder", JSON.stringify(all));
+            return all;
+        }
+        return JSON.parse(saved);
+    }
+
+    function setCamOrder(order) {
+        setCookie("camOrder", JSON.stringify(order));
+    }
+
+    function applyButtonOrder() {
+        const bar = document.querySelector(".cam-toggle-bar");
+        if (!bar) return;
+
+        const savedOrder = getCamOrder().map(String);
+
+        // Map current buttons by cam id
+        const btnMap = {};
+        Array.from(bar.querySelectorAll(".cam-toggle-btn")).forEach(btn => {
+            btnMap[String(btn.dataset.camid)] = btn;
+        });
+
+        // Build final order:
+        // 1) saved ids that still exist
+        // 2) any new buttons not in the saved cookie (new cameras, etc.)
+        const existingIds = Object.keys(btnMap);
+        const finalOrder = savedOrder.filter(id => btnMap[id]);
+        existingIds.forEach(id => {
+            if (!finalOrder.includes(id)) finalOrder.push(id);
+        });
+
+        // Re-append buttons in that order
+        finalOrder.forEach(id => bar.appendChild(btnMap[id]));
+
+        // Keep cookie in sync (helps when cams added/removed)
+        setCamOrder(finalOrder);
+    }
+
+
+    function updateCameraVisibility() {
+        const visible = getVisibleCams().map(String);
+        const order = getCamOrder();
+        const grid = document.getElementById("cameraGrid");
+        const tilesMap = {};
+        document.querySelectorAll(".camera-tile").forEach(tile => {
+            tilesMap[tile.dataset.camid] = tile;
+        });
+
+        grid.innerHTML = "";
+
+        order.forEach((camId, index) => {
+            const tile = tilesMap[camId];
+            if (!tile) return;
+            const img = tile.querySelector("img");
+
+            if (visible.includes(camId)) {
+                tile.style.display = "flex";
+                setTimeout(() => {
+                    img.removeAttribute("src");
+                    img.src = buildSnapshotUrl(camId);
+                    img.onerror = () => {
+                        setTimeout(() => img.src = buildSnapshotUrl(camId), 1000);
+                    };
+                }, index * 300);
+            } else {
+                tile.style.display = "none";
+                img.src = "";
+            }
+
+            grid.appendChild(tile);
+        });
+
+        document.querySelectorAll(".cam-toggle-btn").forEach(btn => {
+            const camId = btn.dataset.camid;
+            if (visible.includes(camId)) {
+                btn.style.backgroundColor = "#4CAF50";
+                btn.style.color = "white";
+            } else {
+                btn.style.backgroundColor = "#ccc";
+                btn.style.color = "black";
+            }
+        });
+    }
+
+    function toggleCamera(camId) {
+        const img = document.querySelector(`.snapshot-cam[data-cam="${camId}"]`);
+        const tile = document.querySelector(`.camera-tile[data-camid="${camId}"]`);
+        const btn = document.querySelector(`.cam-toggle-btn[data-camid="${camId}"]`);
+        let visible = getVisibleCams().map(String);
+
+        if (visible.includes(camId)) {
+            // Hide this cam
+            visible = visible.filter(id => id !== camId);
+            tile.style.display = "none";
+            img.src = "";
+            btn.style.backgroundColor = "#ccc";
+            btn.style.color = "black";
+        } else {
+            // Show this cam
+            visible.push(camId);
+            tile.style.display = "flex";
+            img.removeAttribute("src");
+            img.src = buildSnapshotUrl(camId);
+            btn.style.backgroundColor = "#4CAF50";
+            btn.style.color = "white";
+        }
+
+        setVisibleCams(visible);
+    }
+
+
+    function applyScale() {
+        setCookie("snapshotScale", currentScale);
+        refreshSnapshots();
+    }
+
+    function adjustCols(delta) {
+        currentCols = Math.max(1, currentCols + delta);
+        setCookie("snapshotCols", currentCols);
+        applyColumnLayout();
+    }
+
+    function applyColumnLayout() {
+        const grid = document.querySelector('.camera-grid');
+        grid.style.gridTemplateColumns = `repeat(${currentCols}, 1fr)`;
+        document.getElementById('colLabel').textContent = `${currentCols} column${currentCols > 1 ? 's' : ''}`;
+    }
+
+    function updateScaleUI() {
+        document.getElementById('scaleRange').value = currentScale;
+        document.getElementById('scaleLabel').textContent = `${currentScale}%`;
+    }
+
+    function enableDragAndDrop() {
+        const buttons = document.querySelectorAll(".cam-toggle-btn");
+        let dragged = null;
+
+        buttons.forEach(btn => {
+            btn.setAttribute("draggable", true);
+
+            btn.addEventListener("dragstart", () => {
+                dragged = btn;
+                btn.classList.add("dragging");
+            });
+
+            btn.addEventListener("dragend", () => {
+                dragged = null;
+                btn.classList.remove("dragging");
+
+                const order = Array.from(document.querySelectorAll(".cam-toggle-btn")).map(b => b.dataset.camid);
+                setCamOrder(order);
+                updateCameraVisibility();
+            });
+
+            btn.addEventListener("dragover", (e) => {
+                e.preventDefault();
+                const target = e.target.closest(".cam-toggle-btn");
+                if (target && target !== dragged) {
+                    const parent = target.parentNode;
+                    if (Array.from(parent.children).indexOf(dragged) < Array.from(parent.children).indexOf(target)) {
+                        parent.insertBefore(dragged, target.nextSibling);
+                    } else {
+                        parent.insertBefore(dragged, target);
+                    }
+                }
+            });
+        });
+    }
+
+    function isIOS() {
+      // iPadOS can present as MacIntel
+      return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+             (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    }
+
+    function go2rtcInfo() {
+      const h = location.hostname;
+      const isLocal = (h === "localhost" || h === "127.0.0.1");
+      const cfg = "{{ GO2RTC_HOST }}".trim();
+
+      // Local dev: direct go2rtc (NO /go2rtc prefix)
+      if (isLocal && cfg) {
+        return { base: cfg.replace(/\/+$/, ""), prefix: "" };
+      }
+
+      // Reverse proxy: go2rtc is mounted under /go2rtc
+      return { base: location.origin, prefix: "/go2rtc" };
+    }
+
+    function go2rtcUrl(camName) {
+      const src = encodeURIComponent(camName);
+      const { base, prefix } = go2rtcInfo();
+
+      if (isIOS()) {
+        return `${base}${prefix}/api/stream.m3u8?src=${src}`;
+      }
+      return `${base}${prefix}/stream.html?src=${src}`;
+    }
+
+    function openGo2RTC(camName) {
+      // new tab avoids some https->http weirdness during local dev
+      window.open(go2rtcUrl(camName), "_blank");
+    }
+
+
+    window.onload = function () {
+        updateScaleUI();
+        applyColumnLayout();
+        applyButtonOrder();
+        enableDragAndDrop();
+
+        document.getElementById('scaleRange').addEventListener('change', function () {
+            currentScale = parseInt(this.value, 10);
+            updateScaleUI();
+            setCookie("snapshotScale", currentScale);
+        });
+
+        document.querySelectorAll(".cam-toggle-btn").forEach(btn => {
+            btn.addEventListener("click", () => {
+                toggleCamera(btn.dataset.camid);
+            });
+        });
+
+        document.querySelectorAll(".open-live").forEach(link => {
+            link.addEventListener("click", e => {
+                e.preventDefault();
+                openGo2RTC(link.dataset.src);
+            });
+        });
+
+        updateCameraVisibility();
+        setInterval(refreshSnapshots, 1000);
+    };
+</script>
+</body>
+</html>

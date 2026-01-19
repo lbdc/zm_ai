@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+<style>
+	table { 
+		width: 50%; 
+		border-collapse: collapse; 
+		margin:0px;
+	}
+	tr:nth-of-type(odd) { background: #eee; }
+	th { background: #3498db; color: white; font-weight: bold; }
+	td, th { padding: 4px; border: 1px solid #ccc; text-align: left; font-size: 14px; }
+	.delete-icon:hover { cursor: pointer; }
+
+	@media only screen and (max-width: 760px),
+	       (min-device-width: 768px) and (max-device-width: 1024px) {
+		table { width: 100%; }
+		table, thead, tbody, th, td, tr { display: block; }
+		thead tr { position: absolute; top: -9999px; left: -9999px; }
+		tr { border: 1px solid #ccc; }
+		td { border: none; border-bottom: 1px solid #eee; position: relative; padding-left: 50%; }
+		td:before {
+			position: absolute; top: 6px; left: 6px; width: 45%; padding-right: 10px; white-space: nowrap;
+			content: attr(data-column); color: #000; font-weight: bold;
+		}
+        #counterBox { width: 100%; }
+	}
+
+    /* tiny inline spinner (kept for camera dropdown loading only) */
+    .spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid #ccc;
+      border-top-color: #3498db;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      vertical-align: middle;
+      margin-left: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+  <div id="result"></div>
+  <div id="movie">
+    <h2>Movies</h2>
+    <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Status</th>
+            <th>Length(Min)</th>
+            <th>SizeMB</th>
+            <th>List</th>
+            <th>Log</th>
+            <th>Del</th>
+          </tr>
+        </thead>
+      <tbody id="movieTable"></tbody>
+    </table>
+  </div>
+    <div id="counterBox" style="margin-top:10px; display:none; border:1px solid #ddd; padding:8px; width:50%; box-sizing:border-box;">
+    <b>Status:</b>
+    <div id="counterText" style="margin-top:4px; font-family:monospace;"></div>
+  </div>
+  <div id="make_movie">
+    <h2>Make Movies</h2>
+    <div>
+      <table>
+        <tbody>
+          <tr><td colspan=2>
+            <select id="sel_cam" name="sel_cam" onchange="sel_cam(this)">
+              <option value="Select">Select Camera</option>
+            </select>
+            <span id="cam_loading" class="spinner" style="display:none" title="Loading…"></span>
+            <span id="cam_loading_text" style="display:none; margin-left:6px;">Loading…</span>
+          </td></tr>
+
+          <tr><td>Camera</td><td><input type="text" id="Camera" name="monitor" value="" readonly></td></tr>
+          <tr><td>CameraId</td><td><input type="text" id="CameraId" name="monitorId" value="" readonly></td></tr>
+          <tr><th colspan=2>Required Parameters</th></tr>
+          <tr><td>Video Start</td><td style="position: relative"><input type="datetime-local" step="1" name="start" id="start"/></td></tr>
+          <tr><td>Video End</td><td style="position: relative"><input type="datetime-local" step="1" name="end" id="end"/></td></tr>
+
+          <tr><td>Video Filename auto-generated</td></tr>
+
+          <tr><th colspan=2>Optional Parameters (requires re-encoding)</th></tr>
+          <tr><td colspan="2"><input type="checkbox" id="toggleOptional"> Enable/Disable Optional Parameters</td></tr>
+          <tr><td>Speed</td><td><input type="number" name="Speed" id="Speed" max="1000" min="1" step="1" value="1" disabled></td></tr>
+          <tr><td>Video FPS</td><td><input type="text" id="Fps" name="Fps" value="" readonly disabled></td></tr>
+          <tr><td>New FPS</td><td><input type="number" name="MultiplierX" id="MultiplierX" max="120" min="0" step="0" disabled></td></tr>
+          <tr><td>Video Size</td><td><input type="text" id="Size" name="Size" value="" readonly disabled></td></tr>
+          <tr><td>New Size</td><td><select name="newSize" id="newSize" disabled>
+            <option value="3072:1728">3072:1728</option>
+            <option value="2560:1920">2560:1920</option>
+            <option value="2048:1536">2048:1536</option>
+            <option value="1920:1080">1920:1080</option>
+            <option value="1280:720">1280:720</option>
+            <option value="800:600">800:600</option>
+            <option value="640:480">640:480</option>
+            <option value="320:240">320:240</option>
+          </select></td></tr>
+
+          <tr><th colspan=2>GPU</th></tr>
+          <tr><td><input type="radio" name="GPU" id="vaapi" disabled>VAAPI</td><td><input type="text" name="renderDevice" id="renderDevice" value="dev/dri/renderD128" disabled></td></tr>
+          <tr><td><input type="radio" name="GPU" id="nvidia" disabled checked>NVIDIA (cuvid/nvenc)</td><td></td></tr>
+          <tr><td><input type="radio" name="GPU" id="cpu" disabled>None (use CPU)</td><td></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <button id="listVideos" onclick="listVideos()">Make Video</button>
+  <!-- Removed: 'Also download videos' checkbox and 'Open raw' link -->
+  <div id="videoList" style="margin-top:10px"></div>
+
+<script type="text/javascript">
+// ---------- on page load ----------
+document.addEventListener('DOMContentLoaded', () => {
+  refreshMovieTable();
+  loadEventsSummary();
+  setInterval(refreshMovieTable, 5000);
+});
+
+// If you serve this HTML from /zm_ai/temp/..., relative URLs like "events/..."
+// will resolve under /zm_ai/temp and 404. Force API calls to hit the app root.
+const API_BASE = "/zm_ai";
+
+// ---------- state ----------
+let summaryResults = []; // holds data from /events/summary
+// Globals
+let _counterTimer = null;
+let _lastAutoRefresh = 0; // throttle table refreshes triggered by the poller
+let _currentTargetBase = "";   // e.g., concat_m1_..._to_...
+let _lastOverallPct = 0;
+
+
+// ---------- load monitors + events and build dropdown ----------
+function loadEventsSummary() {
+  const select = document.getElementById("sel_cam");
+  const sp     = document.getElementById("cam_loading");
+  const spTxt  = document.getElementById("cam_loading_text");
+
+  while (select.options.length > 0) select.remove(0);
+  select.add(new Option("Loading cameras…", "loading"));
+  select.disabled = true;
+  sp.style.display = "inline-block";
+  spTxt.style.display = "inline";
+
+  fetch(`${API_BASE}/events/summary`)
+    .then(r => r.json())
+    .then(data => {
+      summaryResults = Array.isArray(data?.results) ? data.results : [];
+      populateCameraDropdown(summaryResults);
+    })
+    .catch(err => {
+      console.error("Failed to load events/summary:", err);
+      while (select.options.length > 0) select.remove(0);
+      select.add(new Option("Failed to load (click to retry)", "retry"));
+      select.disabled = false;
+      select.onchange = () => { if (select.value === "retry") loadEventsSummary(); };
+    })
+    .finally(() => {
+      sp.style.display = "none";
+      spTxt.style.display = "none";
+    });
+}
+
+function populateCameraDropdown(results) {
+  const select = document.getElementById("sel_cam");
+  while (select.options.length > 0) select.remove(0);
+
+  if (!results.length) {
+    select.add(new Option("No cameras found", "none"));
+    select.disabled = true;
+    return;
+  }
+
+  select.add(new Option("Select Camera", "Select"));
+  results.forEach((item, idx) => {
+    const name = item.Name || `Monitor ${item.Id}`;
+    select.add(new Option(name, String(idx)));
+  });
+  select.disabled = false;
+}
+// Convert server "YYYY-MM-DD HH:MM:SS" -> input[type=datetime-local] "YYYY-MM-DDTHH:MM:SS"
+function toDatetimeLocalValue(serverTs){
+  if (!serverTs) return "";
+  return String(serverTs).trim().replace(" ", "T");
+}
+
+// Convert picker "YYYY-MM-DDTHH:MM" or "YYYY-MM-DDTHH:MM:SS" -> backend "YYYY-MM-DD HH:MM:SS"
+function fromDatetimeLocalValue(v){
+  if (!v) return "";
+  v = String(v).trim();
+
+  // add seconds if missing (datetime-local often returns only minutes)
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(v)) {
+    v += ":00";
+  }
+  return v.replace("T", " ");
+}
+
+// ---------- selection handler ----------
+function sel_cam(sel) {
+  const idx = parseInt(sel.value, 10);
+  if (isNaN(idx) || !summaryResults[idx]) return;
+
+  const cam = summaryResults[idx];
+
+  const name = cam.Name || `Monitor ${cam.Id}`;
+  const id   = cam.Id;
+  const earliestStart = cam?.Earliest?.StartTime || "";
+  const latestEnd     = cam?.Latest?.EndTime     || "";
+  const resolution = cam.Resolution;
+  const fps = Number.isFinite(+cam.CaptureFPS) ? Math.round(+cam.CaptureFPS) : "";
+
+  document.getElementById('Camera').value = name;
+  document.getElementById('CameraId').value = id;
+  document.getElementById('start').value = toDatetimeLocalValue(earliestStart);
+  document.getElementById('end').value   = toDatetimeLocalValue(latestEnd);
+  document.getElementById('Size').value = resolution;
+  document.getElementById('newSize').value = resolution;
+  document.getElementById('Fps').value = fps;
+  document.getElementById('MultiplierX').value = fps;
+}
+
+
+// --- Normalizer so UI works with old/new payloads ---
+function normalizeConcatEntry(raw){
+  // Find base name (no extension) + directory
+  const fromConcat = raw?.concat?.path || raw?.videos?.concat?.path || raw?.mp4 || raw?.filePath || "";
+  let dir="", base="";
+  if (fromConcat) {
+    const [p, b] = extractFileInfo(String(fromConcat));
+    dir = p; base = b;
+  } else {
+    base = (raw.base_name || raw.filename || raw.name || "").replace(/\.mp4$/i,"");
+  }
+  if (!base) base = "movie";
+
+  // Build paths if missing
+  const mp4  = raw?.concat?.path || raw?.mp4 || (dir ? `${dir}/${base}.mp4` : "");
+  const json = raw?.saved?.path_json || raw?.json_list || (dir ? `${dir}/${base}.json` : "");
+  const log  = raw?.log || (dir ? `${dir}/${base}.log` : "");
+
+  // Status → prefer explicit, else phase/progress style, else legacy strings
+  let status = "";
+  if (typeof raw.status === "string") {
+    status = raw.status;                   // e.g., "downloading", "concat: done"
+  } else if (raw.phase) {
+    // e.g., {phase:"download", done:3, total:12} or {phase:"concat", status:"running"}
+    const parts = [];
+    parts.push(raw.phase);
+    if (raw.mode && raw.phase === "concat") parts.push(`(${raw.mode})`);
+    if (Number.isFinite(raw.done) && Number.isFinite(raw.total)) parts.push(`${raw.done}/${raw.total}`);
+    if (raw.status) parts.push(String(raw.status));
+    status = parts.join(" ").trim();
+  } else if (raw.progress != null && raw.estTime != null) {
+    status = `${raw.progress}% (eta ${raw.estTime})`;
+  } else if (raw.status === "Completed") {
+    status = "done";
+  } else {
+    status = "—";
+  }
+
+  // Length (min)
+  let lengthMin = "";
+  if (raw.length_min != null) {
+    lengthMin = String(raw.length_min);
+  } else if (raw.length_sec != null) {
+    lengthMin = (Number(raw.length_sec)/60).toFixed(1);
+  } else if (raw.videoDuration != null) {
+    // legacy could already be minutes or a string like "9.5"
+    const n = Number(raw.videoDuration);
+    lengthMin = Number.isFinite(n) ? n.toFixed(1) : String(raw.videoDuration);
+  } else {
+    lengthMin = "";
+  }
+
+  // Size (MB)
+  let sizeMB = "";
+  if (raw.sizeMB != null) sizeMB = String(raw.sizeMB);
+  else if (raw.fileSizeMB != null) sizeMB = String(raw.fileSizeMB);
+  else if (raw.size_bytes != null) sizeMB = (Number(raw.size_bytes)/(1024*1024)).toFixed(1);
+
+  return { base, mp4, json, log, status, lengthMin, sizeMB };
+}
+
+
+function extractFileInfo(filePath) {
+  var pathArray = filePath.split("/");
+  var filenameWithExtension = pathArray[pathArray.length - 1];
+  var filenameArray = filenameWithExtension.split(".");
+  var filename = filenameArray[0];
+  var extension = filenameArray.length > 1 ? filenameArray.pop() : '';
+  pathArray.pop();
+  var path = pathArray.join("/");
+  return [path, filename, extension];
+}
+
+document.getElementById('toggleOptional').addEventListener('change', function() {
+  var optionalFields = document.querySelectorAll('#Speed, #Fps, #MultiplierX, #Size, #newSize, #renderDevice, #nvidia, #vaapi, #cpu');
+  for (var i = 0; i < optionalFields.length; i++) {
+    optionalFields[i].disabled = !this.checked;
+  }
+});
+
+function esc(s){ return String(s)
+  .replace(/&/g,"&amp;").replace(/</g,"&lt;")
+  .replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
+
+function renderDebug(logs){
+  if (!Array.isArray(logs) || !logs.length) return "<p>No debug logs.</p>";
+  return `
+    <details open style="margin-top:10px">
+      <summary><b>Debug</b> (${logs.length} lines)</summary>
+      <pre style="white-space:pre-wrap; max-height:300px; overflow:auto; border:1px solid #ccc; padding:8px; background:#fafafa;">${logs.map(esc).join("\n")}</pre>
+    </details>
+  `;
+}
+
+function clampPct(x){ return Math.max(0, Math.min(100, x)); }
+
+function phasePct(done, total){
+  done = Number(done || 0);
+  total = Number(total || 0);
+  if (!total) return 0;
+  return clampPct((done / total) * 100);
+}
+
+
+function humanBytes(n){
+  n = Number(n||0);
+  const u = ["B","KB","MB","GB","TB"];
+  let i=0; while(n>=1024 && i<u.length-1){ n/=1024; i++; }
+  return `${n.toFixed(n<10&&i>0?1:0)} ${u[i]}`;
+}
+
+function renderCounter(snap){
+  const box = document.getElementById("counterBox");
+  const txt = document.getElementById("counterText");
+  if (!box || !txt) return;
+
+  if (!snap){
+    box.style.display = "none";
+    txt.textContent = "";
+    return;
+  }
+
+  const targetLine = _currentTargetBase ? `${_currentTargetBase}.mp4\n` : "";
+  box.style.display = "block";
+
+  // Pull fields (works for both overall_text and fallback)
+  const phase  = snap.phase || "";
+  const status = snap.status || "";
+  const total  = snap.total ?? 0;
+  const done   = snap.done  ?? 0;
+  const bytes  = snap.bytes ?? 0;
+  const file   = snap.current_file || "";
+
+  // ---- Overall % (download 0-50, concat 51-100) ----
+  let overall = _lastOverallPct;
+  if (phase === "download") {
+    const p = phasePct(done, total);     // 0..100
+    overall = p * 0.50;                  // 0..50
+  } else if (phase === "concat") {
+    const p = phasePct(done, total);     // 0..100
+    overall = 51 + (p * 0.49);           // 51..100
+  }
+  overall = Math.max(overall, _lastOverallPct); // never go backwards
+  _lastOverallPct = overall;
+
+  const overallLine = `Overall: ${overall.toFixed(0)}%\n`;
+
+  // ✅ Prefer server-computed summary
+  if (snap.overall_text) {
+    const cleaned = String(snap.overall_text).replace(/^overall\s+\d+%?\s*—\s*/i, "");
+    txt.textContent = targetLine + overallLine + cleaned;
+    return;
+  }
+
+  // fallback formatting
+  if (phase === "download"){
+    txt.textContent = targetLine + overallLine +
+      `download: ${done}/${total} files  |  ${humanBytes(bytes)}  ` +
+      (file ? `|  ${file}` : "");
+  } else if (phase === "concat"){
+    const mode = snap.mode || "copy";
+    txt.textContent = targetLine + overallLine + `concat (${mode}): ${done}/${total}`;
+  } else {
+    txt.textContent = targetLine + overallLine + `${phase} ${status}`;
+  }
+}
+
+function startCounterPolling(jobId, wantConcat, baseName){
+  _currentTargetBase = String(baseName || "").trim();
+  _lastOverallPct = 0; // reset overall % for this new job
+  const url = `${API_BASE}/events/download_counter?job_id=${encodeURIComponent(jobId)}`;
+  const box = document.getElementById("counterBox");
+  if (box) box.style.display = "block";
+
+  // clear any previous poller
+  if (_counterTimer){ clearInterval(_counterTimer); _counterTimer = null; }
+
+  let misses = 0;
+  let sawRealSnap = false;   // we have seen available=true at least once
+
+  _counterTimer = setInterval(() => {
+    fetch(url, { cache: "no-store" })
+      .then(r => r.ok ? r.json() : null)
+      .then(snap =>  {
+        // If the counter file isn't created yet, keep polling for a bit.
+        if (!snap || snap.available === false) {
+          misses += 1;
+
+          // If we already saw real progress, counter disappearing usually means:
+          // job finished and server removed the counter file. Stop + hide now.
+          if (sawRealSnap) {
+            _currentTargetBase = "";
+            clearInterval(_counterTimer); _counterTimer = null;
+            renderCounter(null);
+            refreshMovieTable(); // final refresh so table reflects final size/duration
+            return;
+          }
+
+          // Otherwise, treat it as "not created yet" (startup delay)
+          renderCounter({ phase: "", status: "waiting", total: 0, done: 0, bytes: 0 });
+
+          if (misses >= 30) {
+            _currentTargetBase = "";
+            clearInterval(_counterTimer); _counterTimer = null;
+            renderCounter(null);
+          }
+          return;
+        }
+        sawRealSnap = true;
+        misses = 0;
+
+        // 1) update the on-screen counter widget
+        renderCounter(snap);
+
+        // update the placeholder row status + clickable MP4 based on overall_status
+        if (_currentTargetBase) {
+          const base = _currentTargetBase;
+
+          // get whatever we already have (or create a minimal entry)
+          const e = tableState.get(base) || { base, mp4:"", json:"", log:"", lengthMin:"", sizeMB:"" };
+
+          // show a friendly status
+          e.status = snap.overall_text
+            ? String(snap.overall_text).replace(/^overall\s+\d+%?\s*—\s*/i, "")
+            : `${snap.phase || ""} ${snap.status || ""}`.trim();
+
+          // ✅ ONLY clickable when job fully done
+          if (snap.overall_status === "done") {
+            e.mp4 = `${API_BASE}/temp/${encodeURIComponent(base + ".mp4")}`;
+          } else {
+            e.mp4 = ""; // not clickable yet
+          }
+
+          upsertRow(e);
+        }
+
+        // 2) while downloading/concatenating, refresh the table occasionally
+        const now = Date.now();
+        if ((snap.phase === "download" || snap.phase === "concat") &&
+            (now - _lastAutoRefresh) > 3000) {
+          _lastAutoRefresh = now;
+          refreshMovieTable();
+        }
+
+        // 3) stop & final refresh when done
+        const finished = (snap.overall_status === "done") || (snap.overall_status === "error");
+          if (finished) {
+            _currentTargetBase = "";
+             clearInterval(_counterTimer); _counterTimer = null;
+            renderCounter(null);
+            refreshMovieTable();
+          }
+      })
+      .catch(() => { /* ignore transient poll errors */ });
+  }, 1000);
+}
+
+
+// ---------- List videos (auto-download + concat) ----------
+function listVideos() {
+  const id    = document.getElementById("CameraId").value.trim();
+  const start = fromDatetimeLocalValue(document.getElementById("start").value);
+  const end   = fromDatetimeLocalValue(document.getElementById("end").value);
+
+  if (!id || !start || !end) {
+    alert("Select a camera and set Start/End first.");
+    return;
+  }
+
+  const params = new URLSearchParams({
+    monitor_id: id,
+    start: start,
+    end: end,
+    download: "true",
+    trim: "true",
+    concat: "true",
+    debug: "true",
+  });
+
+  // Optional re-encode controls
+  const optOn = document.getElementById("toggleOptional").checked;
+  if (optOn) {
+    const speedVal = (document.getElementById("Speed").value || "1").trim();
+    const fpsRaw   = (document.getElementById("MultiplierX").value || "").trim();
+    const sizeVal  = (document.getElementById("newSize").value || "").trim();
+    if (speedVal) params.set("speed", String(speedVal));
+    const fpsVal = parseInt(fpsRaw, 10);
+    if (Number.isFinite(fpsVal) && fpsVal > 0) params.set("fps", String(fpsVal));
+    if (sizeVal) params.set("size", sizeVal.replace("x", ":"));
+    const gpuRadio = document.querySelector('input[name="GPU"]:checked');
+    params.set("use_gpu", gpuRadio && gpuRadio.id === "nvidia" ? "true" : "false");
+  } else {
+    ["speed","fps","size","use_gpu"].forEach(k => params.delete(k));
+  }
+
+  // job_id used by backend counter
+  const jobId = `${id}-${Date.now()}`;
+  params.set("job_id", jobId);
+
+  // Create/refresh a placeholder row immediately so the Status column has
+  // something to update while the job runs.
+  const expectedBase = `concat_m${id}_${safeId(start)}_to_${safeId(end)}`;
+  upsertRow({
+    base: expectedBase,
+    mp4: "",                      // not ready yet
+    json: "",                      // optional
+    log: "",
+    status: "starting…",
+    lengthMin: "",
+    sizeMB: "",
+    ready: false                  // IMPORTANT: not clickable yet
+  });
+
+  const url = `events/videos/export?${params.toString()}`;
+  const out = document.getElementById("videoList");
+  out.textContent = "Exporting & summarizing…";
+
+  // Start polling counters immediately
+  const wantConcat = params.get("concat") === "true";
+  startCounterPolling(jobId, wantConcat, expectedBase);
+
+  fetch(`${API_BASE}/events/videos/export?${params.toString()}`, { cache: "no-store", headers: { "Accept": "application/json" } })
+    .then(r => r.json())
+    .then(data => {
+      const monitorId = data?.monitor_id ?? id;
+      const count     = data?.results?.count ?? data?.count ?? 0;
+
+      const reqStart  = data?.requested?.start || start;
+      const reqEnd    = data?.requested?.end   || end;
+      const reqHMS    = data?.requested?.span_hms ?? "";
+      const reqSec    = data?.requested?.span_seconds ?? "";
+
+      const covFirst  = data?.results?.coverage?.first_start || "—";
+      const covLast   = data?.results?.coverage?.last_end    || "—";
+      const covHMS    = data?.results?.coverage?.span_hms    || "00:00:00";
+      const covSec    = data?.results?.coverage?.span_seconds ?? 0;
+
+      const savedPath = data?.saved?.path || "(saved to ./temp, server-side)";
+      const savedBytes= data?.saved?.bytes ?? 0;
+
+      const conInfo = data?.videos?.concat || data?.concat || {};
+      const concatRow = conInfo?.enabled
+        ? `<tr><td>Concat</td><td><code>${esc(conInfo.path || "")}</code> (${conInfo.bytes ?? 0} bytes) — ${esc(conInfo.mode || "copy")}${conInfo.encoder ? " / " + esc(conInfo.encoder) : ""}${conInfo.device ? " @ " + esc(conInfo.device) : ""}</td></tr>`
+        : `<tr><td>Concat</td><td>—</td></tr>`;
+
+      const debugLogs = Array.isArray(data?.debug) ? data.debug : [];
+
+      out.innerHTML = `
+        <h3>Export summary</h3>
+        <table>
+          <tbody>
+            <tr><td>Monitor</td><td>${monitorId}</td></tr>
+            <tr><td>Records</td><td>${count}</td></tr>
+            <tr><td>Requested range</td><td>${reqStart} → ${reqEnd}</td></tr>
+            <tr><td>Requested span</td><td>${reqHMS} (${reqSec}s)</td></tr>
+            <tr><td>Coverage</td><td>${covFirst} → ${covLast}</td></tr>
+            <tr><td>Coverage span</td><td>${covHMS} (${covSec}s)</td></tr>
+            <tr><td>Saved list</td><td><code>${esc(savedPath)}</code> (${savedBytes} bytes)</td></tr>
+            ${concatRow}
+          </tbody>
+        </table>
+        ${renderDebug(debugLogs)}
+      `;
+
+    // Immediately reflect this job in the table using the API response
+    const entryFromExport = normalizeToEntry(data);
+      // Refresh the table immediately after the first response
+      refreshMovieTable();
+    })
+    .catch(err => {
+      console.error("Failed to export/summarize:", err);
+      out.textContent = "Failed to export/summarize.";
+    });
+}
+
+// ---------- helpers ----------
+function pathParts(p){
+  if (!p) return {dir:"", base:"", ext:""};
+  p = String(p).replace(/\\/g, "/");   // ✅ windows -> web style
+  const a = p.split("/"); const fn = a.pop() || "";
+  const dot = fn.lastIndexOf(".");
+  const base = dot >= 0 ? fn.slice(0, dot) : fn;
+  const ext  = dot >= 0 ? fn.slice(dot+1) : "";
+  return {dir: a.join("/"), base, ext};
+}
+
+
+// Must match backend _safe_id(): re.sub(r"[^A-Za-z0-9._-]+", "-", s).strip("-")
+function safeId(s){
+  return String(s || "")
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/^-+/, "")
+    .replace(/-+$/, "");
+}
+function aOrDash(href, label){ return href ? `<a href="${href}" target="_blank">${label}</a>` : "—"; }
+
+// Holds latest rows by base name (no extension)
+const tableState = new Map();
+
+// Build or update one row
+function upsertRow(entry){
+  const tbody = document.getElementById("movieTable");
+  if (!tbody) return;
+
+  const base = entry.base || "movie";
+  tableState.set(base, entry);
+
+  const rowId = `row-${base}`;
+  let tr = document.getElementById(rowId);
+
+  const ready = !!entry.ready;
+
+  // MP4 clickable only if ready
+  const nameCell = (ready && entry.mp4)
+  ? `<a href="${entry.mp4}" target="_blank">${base}.mp4</a>`
+  : `${base}.mp4`;
+
+  const listCell = aOrDash(entry.json, "📄");
+  const logCell  = aOrDash(entry.log,  "📜");
+  const delCell  = `<span class="delete-icon" title="Delete files" onclick='deleteFile(${JSON.stringify(base)})'>🗑️</span>`;
+
+  const html = `
+    <td data-column="Name">${nameCell}</td>
+    <td data-column="Status" id="status-${base}">${entry.status || "—"}</td>
+    <td data-column="Length(Min)" id="len-${base}">${entry.lengthMin ?? ""}</td>
+    <td data-column="SizeMB" id="size-${base}">${entry.sizeMB ?? ""}</td>
+    <td data-column="List">${listCell}</td>
+    <td data-column="Log">${logCell}</td>
+    <td data-column="Del">${delCell}</td>
+  `;
+
+  if (!tr){
+    tr = document.createElement("tr");
+    tr.id = rowId;
+    tr.innerHTML = html;
+    tbody.insertAdjacentElement("afterbegin", tr); // newest first
+  } else {
+    tr.innerHTML = html;
+  }
+}
+
+function tempUrlFromAnyPath(u){
+  u = String(u || "");
+  if (!u) return "";
+
+  // normalize Windows backslashes
+  u = u.replace(/\\/g, "/");
+
+  // keep only filename
+  const fn = u.split("/").pop();
+  if (!fn) return "";
+
+  // always serve from /zm_ai/temp/<filename>
+  return `${API_BASE}/temp/${encodeURIComponent(fn)}`;
+}
+
+
+// Normalize various payload shapes into a row entry
+function normalizeToEntry(raw){
+    
+  // Prefer server-provided web URLs if present; otherwise keep existing paths
+  const mp4Url  = tempUrlFromAnyPath(raw?.videos?.concat?.path_url || raw?.concat?.path_url || raw?.mp4_url || raw?.videos?.concat?.path || raw?.concat?.path || raw?.mp4 || raw?.output);
+  const listUrl = tempUrlFromAnyPath(raw?.videos?.concat?.list_url || raw?.concat?.list_url || raw?.json_url || raw?.saved?.path_url || raw?.saved?.path);
+  const logUrl  = tempUrlFromAnyPath(raw?.log_url || raw?.log || raw?.log_path);
+
+  const mp4Path  = raw?.videos?.concat?.path || raw?.concat?.path || raw?.mp4 || raw?.output || "";
+  const listPath = raw?.videos?.concat?.list || raw?.concat?.list || raw?.saved?.path_url || raw?.saved?.path || raw?.json || raw?.json_list || "";
+  const logPath  = raw?.log || raw?.log_path || "";
+
+  let base="", dir="";
+
+  // ✅ best source: server already knows the correct base name
+  if (raw?.base_name) {
+    base = String(raw.base_name).replace(/\.mp4$/i,"");
+  } else if (mp4Path) {
+    const p = pathParts(mp4Path); base = p.base; dir = p.dir;
+  } else if (listPath) {
+    const p = pathParts(listPath); base = p.base; dir = p.dir;
+  }
+
+
+  const lengthMin = raw?.length_min != null ? String(raw.length_min)
+                   : raw?.length_sec != null ? (Number(raw.length_sec)/60).toFixed(1)
+                   : raw?.videos?.concat?.bytes != null && raw?.videos?.concat?.path ? "" // we’ll compute after final refresh
+                   : (raw?.videoDuration != null ? String(raw.videoDuration) : "");
+
+  const sizeMB = raw?.sizeMB != null ? String(raw.sizeMB)
+                : raw?.fileSizeMB != null ? String(raw.fileSizeMB)
+                : raw?.videos?.concat?.bytes != null ? (Number(raw.videos.concat.bytes)/(1024*1024)).toFixed(1)
+                : raw?.size_bytes != null ? (Number(raw.size_bytes)/(1024*1024)).toFixed(1)
+                : "";
+
+  let status = "—";
+  if (typeof raw?.status === "string") status = raw.status;
+  else if (raw?.phase){
+    const parts=[raw.phase];
+    if (raw.phase==="concat" && raw.mode) parts.push(`(${raw.mode})`);
+    if (Number.isFinite(raw.done)&&Number.isFinite(raw.total)) parts.push(`${raw.done}/${raw.total}`);
+    if (raw.status) parts.push(String(raw.status));
+    status = parts.join(" ").trim();
+  } else if (raw?.progress != null) status = `${raw.progress}%`;
+
+  const mp4  = mp4Url  || "";
+  const json = listUrl || "";
+  const log  = logUrl  || "";
+
+  const ready = true; // concat_index items are finished
+
+  return { base, mp4, json, log, lengthMin, sizeMB, status, ready };
+
+}
+
+// Delete concat set on the server (POST)
+function deleteFile(baseName){
+  fetch(`${API_BASE}/events/files/delete?base=${encodeURIComponent(baseName)}`, { method: "POST" })
+    .then(r => r.ok ? r.json().catch(()=>({ok:true})) : Promise.reject())
+    .then(() => {
+      tableState.delete(baseName);
+      const tr = document.getElementById(`row-${baseName}`);
+      if (tr && tr.parentNode) tr.parentNode.removeChild(tr);
+    })
+    .catch(() => alert("Delete failed (endpoint missing or server error)."));
+}
+
+// Build rows from a list endpoint (if present)
+function createTableRow(items){
+  const tbody = document.getElementById("movieTable");
+  if (!tbody) return;
+
+  // ✅ Preserve in-progress entry BEFORE clearing
+  const runningBase = _currentTargetBase || "";
+  const runningEntry = runningBase ? tableState.get(runningBase) : null;
+
+  // Rebuild from scratch
+  tbody.innerHTML = "";
+  tableState.clear();
+
+  // Add finished items from the server
+  if (Array.isArray(items) && items.length) {
+    for (const x of items){
+      const e = normalizeToEntry(x);
+      if (!e.base) continue;
+      upsertRow(e);
+    }
+  }
+
+  // ✅ Re-insert the in-progress placeholder row (so it doesn't disappear)
+  if (runningEntry && runningEntry.base && !runningEntry.ready) {
+    upsertRow(runningEntry);
+  }
+
+  // Empty state only if nothing exists AND no running job
+  if ((!items || !items.length) && !(runningEntry && runningEntry.base && !runningEntry.ready)) {
+    tbody.innerHTML = `<tr><td colspan="7" data-column="Status">No videos</td></tr>`;
+  }
+}
+
+
+
+
+// Try to fetch finished concats (works if you add the endpoint below)
+function refreshMovieTable(){
+  fetch(`${API_BASE}/events/concat_index`, { cache: "no-store" })
+    .then(r => r.ok ? r.json() : Promise.reject())
+    .then(data => {
+      const items = Array.isArray(data) ? data
+                  : Array.isArray(data?.items) ? data.items
+                  : [];
+      createTableRow(items);
+    })
+    .catch(() => { /* endpoint not present yet; still fine */ });
+}
+
+
+</script>
+</body>
+</html>

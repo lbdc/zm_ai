@@ -1,0 +1,133 @@
+Zoneminder python scripts using fastAPI that can run on ANY computer (windows, linux) with a Nvidia GPU independently of the zoneminder hardware. No need to any modifications to the ZM machine, uses the ZM API's only.
+
+Tested under ubuntu 24.04/windows 11 with python 3.12 and zoneminder 1.37.68 with or without apache basic auth enabled and zoneminder builtin OPT_USE_AUTH enabled. Zoneminder API have to be enabled.
+
+The need came from my zoneminder computer not having a GPU. So this uses my other desktop (with NVIDIA GPU) to do the analysis over the network.
+
+In short, zm_ai uses 4 scripts that can run independently
+1) poll_zm_for_events.py (polls zoneminder events every 10 seconds)
+2) yolo8_analyze.py (AI detection using yolo8 on ZM event video)
+3) email_notify.py (Optional, emails stills of detections)
+4) zm_ai.py (Dashboard to the above)
+
+The dashboard also includes:
+- Script start/stop control
+- Detected image file management
+- Settings (note: email settings have to be changed in the file directly)
+- Link to zoneminder
+- Camera Montage (includes go2rtc if setup)
+- Video export function
+- Log review
+
+### Dashboard
+![Main UI](images/dashboard.jpg)
+
+![Main UI](images/detected.jpg)
+
+![Main UI](images/montage.jpg)
+
+![Main UI](images/export.jpg)
+### SETUP
+1) Setup in a folder say `zm_ai`:
+
+   Windows (PowerShell / Windows Terminal)  
+   ```powershell
+   setup_zm_ai.ps1
+   ```
+(if powershell has execution policy issues, simply bypass it as so "powershell -ExecutionPolicy Bypass -File .\setup_zm_ai.ps1")
+
+   Ubuntu Linux  
+   ```bash
+   ./bash setup_zm_ai.sh
+   ```
+Must install before running setup
+- python 3.10 - 3.12 at https://www.python.org/downloads/
+- X64 Redistributable package at https://aka.ms/vc14/vc_redist.x64.exe
+- ffmpeg at https://www.ffmpeg.org/download.html
+
+
+Setup will download all pip requirements, pytorch and yolo8 (ultralytics) and activate the python environment
+*** ensure you have plenty of space because yolo8, pytorch and opencv takes a lot of disc space ***
+
+2) Start the script
+Review settings.ini and email_settings.ini to match your installation (or do this later through the front end)
+
+   Windows (PowerShell / Windows Terminal)  
+   ```powershell
+   start_zm_ai.ps1
+   ```
+(if powershell has execution policy issues, simply bypass it as so "powershell -ExecutionPolicy Bypass -File .start_zm_ai.ps1")
+
+   Ubuntu Linux  
+   ```bash
+   bash start_zm_ai.sh
+   ```
+This will activate the python environment and execute the zm_ai.py script. 
+All other script should start automatically and be managed from the dashboard.
+
+3) Go to your browser and enter http://localhost:8001/zm_ai
+*** Adjust settings as required.
+The file "settings.ini.template" includes a GO2RTC field. Update your existing settings.ini 
+if you need GO2RTC which opens the GO2RTC stream from the montage page by clicking on the TV icon on each monitor.
+
+Note that if any ZM camera zones are created with the name "no_yolo", the AI will skip any detections in those zones. This is to eliminate false positives (e.g. a bush that may be detected as a person)
+
+4) If you have access to your zoneminder computer through the internet, you can reverse proxy zm_ai.py through apache.
+** Note that the communication between the zm_ai.py and zoneminder machines are not encrypted so I recommend to keep those on a local network. Unsure about how safe this reverse proxy is. Use at own risk.
+
+SETTINGS.INI
+
+[general]\
+mon_camid = 1,2,3 # Cameras to monitor\
+zm_host = https://192.168.1.10:443 # host of zoneminder machine. Assumes /zm and /zm/api. Can be http or https, any ports\
+GO2RTC_HOST = http://192.168.1.10:1984\
+log_enable = True\
+log_retention_days = 1
+
+[paths] # Folders relative to location of python scripts\
+zm_alarm_queue = to_be_processed\
+zm_ai_detections_dir = detected_frames\
+yolo_config_path = yolo
+
+[credentials]\
+zm_user = zm_user # Zoneminder use_auth\
+zm_pass = zm_pass\
+bauth_user = bauth_user # apache basic auth\
+bauth_pwd = bauth_pass
+
+[detection]\
+use_gpu = True # always true, not used\
+use_box = True\
+confidence_threshold = 0.80\
+obj_list = person, bird, cat, dog # from coco.txt\
+threshold = 10 # will skip analyzing events if rate exceeds threshold/time_window (e.g. 10 Events/60s)\
+time_window = 60
+
+[email]\
+email_batch_interval = 60 (wait in seconds before emailing. Prevents getting bunch of emails.\
+email_camid = 2
+
+### If you want to reverse proxy through https, apache configuration below 
+
+```apache
+<VirtualHost *:443>
+    ProxyPreserveHost On
+    RewriteEngine on
+
+    # FastAPI/zm_ai
+
+    # Optional: redirect HTTP to HTTPS
+    RewriteCond %{HTTPS} off
+    RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+    # Pass X-Forwarded-Proto so FastAPI knows the original scheme
+    RequestHeader set X-Forwarded-Proto "https"
+
+    #
+    ProxyPass /zm_ai http://192.168.1.XXX:YYYY/zm_ai
+    ProxyPassReverse /zm_ai http://192.168.1.XXX:YYYY/zm_ai
+
+</VirtualHost>
+```
+
+*** I am not a programmer so constructive comments welcomed. AI was used in the generation of this code.
